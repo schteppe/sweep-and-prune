@@ -1,6 +1,8 @@
 # sweep-and-prune
 
-Incremental 2D sweep and prune collision detection for JavaScript, based on [this article by Pierre Terdiman](http://www.codercorner.com/SAP.pdf).
+Incremental 2D sweep and prune collision detection for JavaScript.
+
+[![Donate](https://img.shields.io/badge/Donate-PayPal-green.svg)](https://www.paypal.com/cgi-bin/webscr?cmd=_donations&business=Z2G8VHLDJ9N3L&lc=GB&item_name=Stefan%20Hedman&item_number=schteppe&currency_code=USD&bn=PP%2dDonationsBF%3aDonate%2dPayPal%2dgreen%2esvg%3aNonHosted)
 
 ## Installation
 
