@@ -1,0 +1,323 @@
+<html>
+  <head>
+    <style>
+    canvas {
+      background-color: #ddf;
+    } 
+    </style>
+  </head>
+<body>
+  
+    <p>Number of boxes: <span id="numBoxes"></span> <input type="submit" onclick="double()" value="More"/><input type="submit" onclick="halve()" value="Less"/></p>
+
+    <p>Moving boxes: <span id="numMoving"></span><input type="submit" onclick="updateMoving(10)" value="More"/><input type="submit" onclick="updateMoving(-10)" value="Less"/></p>
+    
+    <p id="fps">FPS: </p>
+    
+    <canvas width=600 height=600 id=canvas></canvas>
+    
+    <p>Incremental 2D sweep and prune collision detection, based on <a href="http://www.codercorner.com/SAP.pdf">this article by Pierre Terdiman</a>.</p>
+    <p>SAP is a broad-phase algorithm whose goal is to determine overlapping pairs of objects. An object in the SAP is defined by an AABB. Given a set of N boxes, the
+    goal is to find the subset of overlapping pairs. In this context, "incremental" means that the SAP provides the added and removed pairs each frame, instead of a full list.</p>
+    
+
+<script>
+    var sap, pixelRatio, dirty, boxes, size, movingPercent, ctx, pairs, previousTime, averageDeltaTime, canvasWidth, canvasHeight;
+    
+    function EndPoint(value,isMin){
+      this.ownerBox = null;
+      this.value = value;
+      this.isMin = isMin;
+    };
+    
+    function Box(minX,minY,maxX,maxY){
+      this.minEndPoints = [minX,minY];
+      this.maxEndPoints = [maxX,maxY];
+      this.userData = null;
+    };
+    
+    Box.prototype = {
+      overlaps: function(box){
+        var l1X = this.minEndPoints[0].value;
+        var u1X = this.maxEndPoints[0].value;
+        var l1Y = this.minEndPoints[1].value;
+        var u1Y = this.maxEndPoints[1].value;
+        var l2X = box.minEndPoints[0].value;
+        var u2X = box.maxEndPoints[0].value;
+        var l2Y = box.minEndPoints[1].value;
+        var u2Y = box.maxEndPoints[1].value;
+        return !(
+          l2X > u1X ||
+          u2X < l1X ||
+          u2Y < l1Y ||
+          l2Y > u1Y
+        );
+      }
+    };
+    
+    function SweepAndPrune(){
+      this.boxes = [];
+      this.endPoints = [[],[]];
+      this.onadd = function(boxA, boxB){};
+      this.onremove = function(boxA, boxB){};
+    };
+    
+    SweepAndPrune.prototype = {
+      addObject: function(x0, y0, x1, y1, userData){
+        var minX = new EndPoint(x0,true);
+        var maxX = new EndPoint(x1,false);
+        var minY = new EndPoint(y0,true);
+        var maxY = new EndPoint(y1,false);
+        var box = new Box(minX,minY,maxX,maxY);
+        box.userData = userData;
+        minX.ownerBox = maxX.ownerBox = minY.ownerBox = maxY.ownerBox = box;
+        this.boxes.push(box);
+        
+        var endPoints = this.endPoints;
+        if(endPoints[0].length === 0){
+          endPoints[0].push(minX,maxX);
+        } else {
+          var insertIndexMinX = endPoints[0].length-1;
+          while(insertIndexMinX > 0 && endPoints[0][insertIndexMinX].value > minX.value){
+            insertIndexMinX--;
+          }
+          endPoints[0].splice(insertIndexMinX,0,minX);
+          var insertIndexMaxX = insertIndexMinX+1;
+          while(insertIndexMaxX > 0 && insertIndexMaxX<endPoints[0].length-1 && endPoints[0][insertIndexMaxX].value < maxX.value){
+            insertIndexMaxX++;
+          }
+          endPoints[0].splice(insertIndexMaxX,0,maxX);
+        }
+        endPoints[1].push(minY,maxY);
+    
+        this.updateObject(box, x0, y0, x1, y1);
+        return box;
+      },
+      updateObject: function(box, x0, y0, x1, y1){
+        box.minEndPoints[0].value = x0;
+        box.minEndPoints[1].value = y0;
+        box.maxEndPoints[0].value = x1;
+        box.maxEndPoints[1].value = y1;
+        
+        // Find new position for this object
+        for(var axisIndex=0, l=this.endPoints.length; axisIndex<l; axisIndex++){
+          var axis = this.endPoints[axisIndex];
+          this.sort(axis);
+        }
+      },
+      removeObject: function(box){
+        box.minEndPoints[1].value = 
+        box.maxEndPoints[1].value = Number.MAX_VALUE;
+        var axisIndex=1;
+        var axis = this.endPoints[axisIndex];
+        this.sort(axis);
+        this.boxes.splice(this.boxes.indexOf(box),1);
+        for(var axisIndex=0; axisIndex<this.endPoints.length; axisIndex++){
+          var axis = this.endPoints[axisIndex];
+          axis.splice(axis.indexOf(box.minEndPoints[axisIndex]),1);
+          axis.splice(axis.indexOf(box.maxEndPoints[axisIndex]),1);
+        }
+      },
+      sort: function(axis){
+        for(var j=1,l=axis.length; j<l; j++){
+          var keyelement = axis[j];
+          var key = keyelement.value;
+          var i = j - 1;
+          while(i >= 0 && axis[i].value > key){
+            var swapper = axis[i];
+            if (keyelement.isMin && !swapper.isMin){
+              if (swapper.ownerBox.overlaps(keyelement.ownerBox)){
+                this.onadd(swapper.ownerBox, keyelement.ownerBox);
+              }
+            }
+    
+            if (!keyelement.isMin && swapper.isMin){
+              this.onremove(swapper.ownerBox, keyelement.ownerBox);
+            }
+    
+            axis[i+1] = swapper;
+            i = i-1;
+          }
+          axis[i+1] = keyelement;
+        }
+      }
+    };
+    
+    function AABB(x0,y0,x1,y1){
+      this.min = [x0,y0];
+      this.max = [x1,y1];
+    };
+    
+    init();
+    requestAnimationFrame(animate);
+    
+    
+    
+    
+    function init(){
+      pixelRatio = window.devicePixelRatio || 1;
+      dirty = true;
+      aabbs = [];
+      size = 20 * pixelRatio;
+      
+      movingPercent = 50;
+      updateMoving(0);
+    
+      sap = new SweepAndPrune();
+      canvasWidth = 600;
+      canvasHeight = 600;
+      canvas.width = canvas.height = canvasWidth * pixelRatio;
+      canvas.style.width = canvas.style.height = canvasWidth + "px";
+      ctx = canvas.getContext('2d');
+      ctx.lineWidth = 2 * pixelRatio;
+      pairs = new Set();
+      sap.onadd = function(boxA, boxB){
+        var i = boxA.userData.index;
+        var j = boxB.userData.index;
+        if(i > j){
+          var tmp=j; j=i; i=tmp;
+        }
+        pairs.add((i<<16)|j);
+      };
+      sap.onremove = function(boxA, boxB){
+        var i = boxA.userData.index;
+        var j = boxB.userData.index;
+        if(i > j){
+          var tmp=j; j=i; i=tmp;
+        }
+        pairs.delete((i<<16)|j);
+      };
+      for(var i=0; i<128; i++){
+        addAABB();
+      }
+      
+      ctx.fillStyle="green";
+      ctx.strokeStyle="rgb(0,64,0)";
+      previousTime = 0;
+      averageDeltaTime = 0;
+    
+      setInterval(() => {
+        fps.innerHTML = "FPS: " + (1000/averageDeltaTime).toFixed(0);
+      }, 500);
+    }
+    
+    function addAABB(x0,y0){
+      x0 = x0 !== undefined ? x0 : getRandomPosition() - size;
+      y0 = y0 !== undefined ? y0 : getRandomPosition() - size;
+      var x1=x0+size;
+      var y1=y0+size;
+      var aabb = new AABB(x0,y0,x1,y1);
+      aabb.index = aabbs.length;
+      aabbs.push(aabb);
+      aabb.sapBox = sap.addObject(x0,y0,x1,y1,aabb);
+      dirty = true;
+    }
+    
+    function removeAABB(){
+      var aabb = aabbs[aabbs.length-1];
+      sap.removeObject(aabb.sapBox);
+      aabbs.pop();
+      dirty = true;
+    }
+    
+    function getRandomPosition(){
+      return Math.random() * canvasWidth * pixelRatio;
+    }
+    
+    function double(){
+      // Insert them in sorted order, this is faster because the SAP will do less comparisons when sorting.
+      // TODO: The SAP should do this internally
+      var before = aabbs.length;
+      var ypositions = [];
+      while(ypositions.length < before){
+        ypositions.push(getRandomPosition());
+      }
+      ypositions.sort((a,b) => b-a);
+      while(aabbs.length < before*2 || aabbs.length===0)
+        addAABB(getRandomPosition(),ypositions.pop());
+    }
+    
+    function halve(){
+      var before = aabbs.length;
+      while(aabbs.length > before/2) removeAABB();
+    }
+    
+    function updateMoving(delta){
+      movingPercent += delta;
+      movingPercent = Math.min(Math.max(movingPercent,0),100);
+      numMoving.innerHTML = movingPercent + "%";
+      dirty = true;
+    }
+    
+    function render(){
+      ctx.clearRect(0,0,canvasWidth*pixelRatio,canvasHeight*pixelRatio);
+      ctx.beginPath();
+      aabbs.forEach((aabb) => {
+        ctx.rect(
+          aabb.min[0],
+          aabb.min[1],
+          aabb.max[0]-aabb.min[0],
+          aabb.max[1]-aabb.min[1]
+        );
+      });
+      ctx.fill();
+      ctx.stroke();
+      ctx.beginPath();
+      pairs.forEach((key) => {
+        var i = (key>>16) & 0xffff;
+        var j = key & 0xffff;
+        var aabbi = aabbs[i];
+        var aabbj = aabbs[j];
+        ctx.moveTo(
+          (aabbi.min[0]+aabbi.max[0])/2,
+          (aabbi.min[1]+aabbi.max[1])/2
+        );
+        ctx.lineTo(
+          (aabbj.min[0]+aabbj.max[0])/2,
+          (aabbj.min[1]+aabbj.max[1])/2
+        );
+      });
+      ctx.stroke();
+      numBoxes.innerHTML = aabbs.length;
+    }
+    
+    function animate(time){
+      requestAnimationFrame(animate);
+      var deltaTime = previousTime ? time-previousTime : 0;
+      previousTime = time;
+      var alpha = 0.03;
+      averageDeltaTime = previousTime ? deltaTime * alpha + (1-alpha) * averageDeltaTime : 16;
+      var deltaTimeSeconds = deltaTime / 1000;
+      var speed = 60;
+      var movingCount = Math.floor(aabbs.length*movingPercent/100);
+      var width = canvasWidth * pixelRatio;
+      for(var i=0; i<movingCount; i++){
+        var aabb = aabbs[i];
+        var dx = speed*(2*i/movingCount-1) * deltaTimeSeconds;
+        var dy = speed*Math.cos(i) * deltaTimeSeconds;
+        aabb.min[0] += dx;
+        aabb.max[0] += dx;
+        aabb.min[1] += dy;
+        aabb.max[1] += dy;
+        for(var dim=0; dim<2; dim++){
+          if(aabb.min[dim] < 0){
+            aabb.min[dim] += width;
+            aabb.max[dim] += width;
+          }
+          if(aabb.max[dim] > width){
+            aabb.min[dim] -= width;
+            aabb.max[dim] -= width;
+          }
+        }
+        sap.updateObject(aabb.sapBox, aabb.min[0], aabb.min[1], aabb.max[0], aabb.max[1]);
+        dirty = true;
+      }
+      if(dirty){
+        render();
+        dirty = false;
+      }
+    }
+    
+</script>
+</body>
+</html>
