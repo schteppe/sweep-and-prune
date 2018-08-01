@@ -71,12 +71,6 @@ SweepAndPrune.prototype = {
     var box = new Box(minX,minY,maxX,maxY);
     box.userData = userData;
 
-    this.boxes.forEach((b) => {
-      if(b.userData === userData){
-        debugger;
-      }
-    })
-
     minX.box = maxX.box = minY.box = maxY.box = box;
     this.boxes.push(box);
     
@@ -107,7 +101,7 @@ SweepAndPrune.prototype = {
     return box;
   },
   updateObject: function(box, x0, y0, x1, y1){
-    if(true){
+    if(true){ // try new optimization
         
       var newPos = [[x0,x1],[y0,y1]];
       
