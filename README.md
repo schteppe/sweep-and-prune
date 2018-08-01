@@ -1,5 +1,11 @@
 # sweep-and-prune
 
+Incremental 2D sweep and prune collision detection for JavaScript, based on [this article by Pierre Terdiman](http://www.codercorner.com/SAP.pdf).
+
+## Installation
+
+(TODO)
+
 ## Documentation
 
 ### Constructor
